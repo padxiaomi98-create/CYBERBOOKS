@@ -42,12 +42,22 @@ async def quiz_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     data = load_data()
     
+    # 1. Yangi quiz boshlanganda sanagichni 0 qilish
     if query.data.startswith("start_"):
         context.user_data['score'] = 0
-        context.user_data['wrong_words'] = [] # Yangi daraja boshlanganda reset
+        context.user_data['wrong_words'] = []
+        context.user_data['question_count'] = 0
         level = query.data.split("_")[1]
     else:
         level = context.user_data.get('current_level', 'hsk1')
+
+    # 2. Savollar sonini oshirish
+    context.user_data['question_count'] += 1
+    
+    # 3. 4 ta savoldan keyin yakunlash
+    if context.user_data['question_count'] > 4:
+        await finish_quiz(update, context)
+        return
 
     context.user_data['current_level'] = level
     words = data.get(level, [])
@@ -56,12 +66,10 @@ async def quiz_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(f"{level.upper()} darajasida so'zlar yetarli emas!")
         return
 
-    # Mantiq: 60% ehtimollik bilan xato topilgan so'zlarni takrorlash
+    # Smart tanlov
     wrong_words = context.user_data.get('wrong_words', [])
     if wrong_words and random.random() < 0.6:
-        # Xato topilgan so'zlar ichidan birini tanlash
-        target_translation = random.choice(wrong_words)
-        correct = next(w for w in words if w['translation'] == target_translation)
+        correct = next(w for w in words if w['translation'] == random.choice(wrong_words))
     else:
         correct = random.choice(words)
 
@@ -70,14 +78,16 @@ async def quiz_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     random.shuffle(options)
     
     keyboard = [[InlineKeyboardButton(opt, callback_data=f"ans_{opt}_{correct['translation']}_{level}")] for opt in options]
-    await query.edit_message_text(f"🀄️ So'z: {correct['word']}\n\nTarjimasini tanlang:", reply_markup=InlineKeyboardMarkup(keyboard))
+    await query.edit_message_text(
+        f"Savol №{context.user_data['question_count']}/4\n🀄️ So'z: {correct['word']}\n\nTarjimasini tanlang:", 
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
 
 async def check_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     _, user_ans, correct_ans, level = query.data.split("_")
     
     wrong_words = context.user_data.get('wrong_words', [])
-    
     if user_ans == correct_ans:
         context.user_data['score'] = context.user_data.get('score', 0) + 1
         if correct_ans in wrong_words:
@@ -91,6 +101,17 @@ async def check_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['wrong_words'] = wrong_words
     keyboard = [[InlineKeyboardButton("➡️ Keyingi savol", callback_data=f"next_{level}")]]
     await query.edit_message_text(f"{status}\n\n🏆 Ball: {context.user_data.get('score', 0)}", reply_markup=InlineKeyboardMarkup(keyboard))
+
+async def finish_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    score = context.user_data.get('score', 0)
+    wrong_count = len(context.user_data.get('wrong_words', []))
+    
+    text = (f"🏁 Quiz yakunlandi!\n\n"
+            f"🏆 Yakuniy natija: {score}/4 ball.\n"
+            f"⚠️ Xato qilingan so'zlar: {wrong_count} ta.\n\n"
+            f"Boshqa darajani tanlash uchun menyudan foydalaning.")
+    await query.edit_message_text(text=text, reply_markup=None)
 
 if __name__ == '__main__':
     app = ApplicationBuilder().token(TOKEN).build()
